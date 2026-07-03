@@ -2352,7 +2352,7 @@ img{content-visibility:auto;loading:lazy}
 // CONFIG
 // ══════════════════════════════════════════════
 let PASS = localStorage.getItem('admin_pass') || 'Ahmed2025';
-const GS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbwe8exO2bDZyNAQBYdO5VVCTcByzb4APApMPaTuO-Ova3a-7kB4FBlgH73oA-5mWfpk/exec';
+const GS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycby_pND7928xFu_nXBt8qcW6ZAg_X7emQ_lST37ZkYqEn4NgwSTpJKsslbV7UTdmP51u/exec';
 // ⚠️ بعد نشر GAS v2، احدّث الرابط أعلاه بالرابط الجديد
 const GN = {"4prim":"الرابع الابتدائي","5prim":"الخامس الابتدائي","6prim":"السادس الابتدائي","1prep":"الأول الإعدادي","2prep":"الثاني الإعدادي","3prep":"الثالث الإعدادي"};
 const CARD_COLS = ['hc-g','hc-b','hc-a','hc-p','hc-r','hc-t'];
@@ -2458,10 +2458,6 @@ let currentCompId = null;
 let pollingInterval = null;
 let _pollingBusy = false; // منع التداخل لو الطلب بطيء
 let isUploading = false;  // 🔒 يمنع الـ polling أثناء رفع الملفات
-
-function stopPolling() {
-  if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
-}
 
 function startPolling() {
   if (pollingInterval) return;
@@ -2796,10 +2792,6 @@ async function loadSiteData() {
   // أخفِ الـ Loading فوراً إذا كان الطالب مش أدمن
   const _isAdm = isAdmin();
 
-  // ══ STEP -1: استعادة allowActive من localStorage فوراً (synchronous) ══
-  // هذا يضمن إن Code Gate يشتغل حتى قبل تحميل الكاش
-  restoreAllowFromStorage();
-
   // ══ تحميل الكاش المحلي أولاً (synchronous — لا يبلوك الـ render) ══
   let hasCachedData = false;
   try {
@@ -2825,20 +2817,7 @@ async function loadSiteData() {
   const _lOv = document.getElementById('loading-ov');
   if (_lOv) _lOv.classList.add('hide-instant');
 
-  // ══ الـ cgate-ov يبدأ مفتوحاً افتراضياً في الـ HTML ══
-  // نخفيه فقط لو الأدمن أو نظام الكود مش مفعّل
-  if (_isAdm || !isAllowActive()) {
-    const _cgEl = document.getElementById('cgate-ov');
-    if (_cgEl) _cgEl.style.display = 'none';
-  }
-
   if (!_isAdm) {
-    // ══ نظام الكود مفعّل → Code Gate شغّال بالفعل من الـ HTML ══
-    if (isAllowActive() && !_codeVerifiedThisSession) {
-      showCodeGate();
-      _bgLoadAndStartPolling(true);
-      return;
-    }
     const _preCheck = getStoredUser();
     if (!_preCheck) {
       // ✅ مفيش بيانات محفوظة → اعرض شاشة الـ Login فوراً
@@ -2984,14 +2963,9 @@ async function _bgLoadAndStartPolling(skipLogin = false) {
         const _chk = getStoredUser();
         if (!_chk) showLoginWelcome();
       } else {
-        // ══ نظام الكود مفعّل — البيانات جاهزة، الـ Code Gate مفتوح بالفعل ══
-        // لا نعمل runStartupChecks هنا عشان ما يتجاوزش الـ Code Gate
-        // الطالب هيضغط "تأكيد" في الـ Code Gate وده يشغّل _proceedAfterLogin
-        if (!isAllowActive()) {
-          runStartupChecks();
-          initNewFeatures();
-        }
-        // لو nظام الكود مفعّل — البيانات اتحدّثت، الـ Code Gate جاهز للتحقق
+        // مستخدم موجود — حدّث فقط
+        runStartupChecks();
+        initNewFeatures();
       }
     } else {
       gsConnected = false;
@@ -3137,20 +3111,14 @@ function mergeSiteData(sd) {
   // ✅ allowList/allowActive — الشيت هو المصدر الوحيد
   if (sd.allowActive !== undefined) D.allowActive = sd.allowActive;
   if (sd.allowGuestBooking !== undefined) D.allowGuestBooking = sd.allowGuestBooking;
-  if (sd.allowList !== undefined && sd.allowList !== null) {
-    // ✅ إصلاح: نتعامل مع القائمة الفارغة [] كحالة صحيحة (يعني الأدمن مسح كل الأكواد)
-    if (sd.allowList.length === 0) {
-      // السيرفر بعت قائمة فارغة — احترم قرار المسح ولا تعيد الأكواد القديمة
-      D.allowList = [];
-    } else {
-      // دمج أكواد السيرفر مع أي إضافات محلية لم تُزامن بعد
-      const serverCodes = new Set(sd.allowList.map(e => typeof e === 'object' ? e.code : e));
-      const localOnly = (D.allowList || []).filter(e => {
-        const c = typeof e === 'object' ? e.code : e;
-        return !serverCodes.has(c);
-      });
-      D.allowList = [...sd.allowList, ...localOnly];
-    }
+  if (sd.allowList && sd.allowList.length) {
+    // دمج بدل استبدال — نحتفظ بأي كود أضيف محلياً ومش موجود على السيرفر بعد
+    const serverCodes = new Set(sd.allowList.map(e => typeof e === 'object' ? e.code : e));
+    const localOnly = (D.allowList || []).filter(e => {
+      const c = typeof e === 'object' ? e.code : e;
+      return !serverCodes.has(c);
+    });
+    D.allowList = [...sd.allowList, ...localOnly];
   }
   if (sd.homework)     D.homework = sd.homework;
   if (sd.hwSubmissions) D.hwSubmissions = sd.hwSubmissions;
@@ -5868,7 +5836,7 @@ function deleteVLab(i) {
 // ══ UNIFIED VIEWER ══
 // Detects: youtube/vimeo → video embed | image urls/base64 → lightbox | else → iframe
 function _isYT(url) { return /youtu\.?be/.test(url); }
-function _isImg(url) { return /\.(jpe?g|png|gif|webp|svg|bmp)(\?|$)/i.test(url) || url.startsWith('data:image') || /i\.ibb\.co\//i.test(url) || /ibb\.co\/[a-zA-Z0-9]/i.test(url); }
+function _isImg(url) { return /\.(jpe?g|png|gif|webp|svg|bmp)(\?|$)/i.test(url) || url.startsWith('data:image'); }
 
 function openViewer(url, title) {
   const ov   = document.getElementById('uv-overlay');
@@ -5919,18 +5887,6 @@ function uvBgClose(e) {
 function openInFrame(url, title) { 
   logActivity('lesson_watch', { title });
   openViewer(url, title); 
-}
-
-// ══ فتح ملف الواجب — صور داخل عارض الإنجازات، PDF في تبويب جديد ══
-function openHwFile(url) {
-  if (!url) return;
-  const isPdf = /\.pdf(\?|$)/i.test(url);
-  if (isPdf) {
-    window.open(url, '_blank');
-    return;
-  }
-  // كل صورة (jpg/png/gif/webp/ibb.co/...) تُفتح في عارض الإنجازات
-  openViewer(url, 'مشاهدة الواجب');
 }
 
 
@@ -7508,16 +7464,8 @@ function getAllowList() { return D.allowList || []; }
 // Read allowActive + allowList from dedicated localStorage keys
 // These always win — even if server/cache doesn't carry them
 function restoreAllowFromStorage() {
-  // قراءة allowActive من localStorage فوراً (قبل أي fetch)
-  // mergeSiteData ستغلب هذه القيمة لما البيانات تجي من الشيت
-  const stored = localStorage.getItem('allowActive');
-  if (stored !== null && D.allowActive === false) {
-    D.allowActive = (stored === 'true');
-  }
-  const storedList = localStorage.getItem('allowList');
-  if (storedList && (!D.allowList || D.allowList.length === 0)) {
-    try { D.allowList = JSON.parse(storedList); } catch(e) {}
-  }
+  // ✅ الشيت هو المرجع — D.allowList/allowActive بيجوا من الشيت مباشرة
+  // هذه الدالة بقت dummy — لا نقرأ من localStorage
 }
 
 function persistAllowLocally() {
@@ -7529,12 +7477,7 @@ function getAllowCodes() {
   // Returns flat array of code strings (handles both string and {code,name} entries)
   return (D.allowList || []).map(e => typeof e === 'object' ? e.code : e);
 }
-function isAllowActive() {
-  // D.allowActive هو المصدر الأساسي (يأتي من الشيت/الكاش)
-  // localStorage كـ fallback فوري قبل تحميل البيانات
-  if (D.allowActive !== undefined && D.allowActive !== null) return !!D.allowActive;
-  return localStorage.getItem('allowActive') === 'true';
-}
+function isAllowActive() { return !!D.allowActive; }
 
 // ── Admin UI helpers ──────────────────────────
 function renderAllowUI() {
@@ -7622,13 +7565,11 @@ async function removeAllowCode(codeVal) {
   if (!D.allowList) return;
   D.allowList = D.allowList.filter(e => (typeof e === 'object' ? e.code : e) !== codeVal);
   renderAllowCodes();
-  // ✅ نحفظ محلياً فوراً لضمان عدم رجوع الكود من الـ polling
-  persistAllowLocally();
-  cacheLocally();
-  // ثم نرفع للسيرفر
+  // ✅ حفظ فوري على السيرفر
   const r = await pushSiteData();
+  persistAllowLocally();
   if (r && r.status === 'ok') showToast('✅ تم حذف الكود وحفظ التغييرات');
-  else showToast('🗑 حُذف الكود محلياً — تعذّر المزامنة مع السيرفر');
+  else showToast('🗑 حُذف الكود — اضغط "حفظ" للمزامنة');
 }
 
 async function clearAllCodes() {
@@ -7645,19 +7586,14 @@ async function clearAllCodes() {
   } catch(e) {}
   D.allowList = [];
   renderAllowCodes();
-  // ✅ نوقف الـ polling مؤقتاً عشان ما يرجّعش الأكواد القديمة أثناء الـ push
-  stopPolling();
-  persistAllowLocally();
-  cacheLocally();
-  // نرفع للسيرفر
+  // ✅ حفظ فوري على السيرفر
   const r = await pushSiteData();
+  persistAllowLocally();
   if (r && r.status === 'ok') {
     showToast('🗑 تم مسح الأكواد وحفظها على السيرفر');
   } else {
-    showToast('🗑 تم مسح الأكواد محلياً — تعذّر المزامنة مع السيرفر');
+    showToast('🗑 تم مسح الأكواد محلياً — تحقق من الاتصال');
   }
-  // نعيد الـ polling بعد الحفظ
-  startPolling();
 }
 
 // استعادة الأكواد المحذوفة من النسخة الاحتياطية
@@ -7863,39 +7799,22 @@ function checkCodeGate() {
     return;
   }
 
-  // ✅ الكود صح
+  // ✅ الكود صح — افتح حساب الطالب تلقائياً
   _codeVerifiedThisSession = true;
   _codeVerifiedValue = val;
 
-  msg.innerHTML = '';
-  hideCodeGate();
-
-  // ابحث عن الطالب صاحب الكود
+  // ابحث عن الطالب في الشيت وربط الجهاز بحسابه
   const codeOwner = (D.siteUsers || []).find(u => (u.code || '').trim() === val);
-
-  // لو الطالب موجود في الشيت → دخّله مباشرة (بغض النظر عن localStorage)
   if (codeOwner) {
     storeUser(codeOwner);
     addAccount(codeOwner);
-    renderAll();
-    buildDynScreens();
-    _proceedAfterLogin(codeOwner);
-    return;
   }
 
-  // الكود في قائمة allowCodes (مش مرتبط بطالب بعينه) → تحقق من localStorage
-  const storedU = getStoredUser();
-  if (storedU) {
-    renderAll();
-    buildDynScreens();
-    _proceedAfterLogin(storedU);
-    return;
-  }
-
-  // لا يوجد حساب → أعرض شاشة التسجيل
+  msg.innerHTML = '';
+  hideCodeGate();
   renderAll();
   buildDynScreens();
-  showLoginWelcome();
+  checkRegistrationAndSplash();
 }
 
 function skipCodeGateAsAdmin() {
@@ -8056,6 +7975,7 @@ function checkRegistration() {
 
   // ── إصلاح الأرقام القديمة (تأجير لما بعد ظهور الـ UI) ──
   if (u) {
+    // نأجّل هذه العملية الثقيلة (localStorage loop) عشان ما تبلوكش الـ render
     setTimeout(() => {
       try {
         let changed = false;
@@ -8074,44 +7994,10 @@ function checkRegistration() {
         });
         if (anyChanged) saveAllAccounts(allAcc);
       } catch(e) {}
-    }, 500);
+    }, 500); // تأجير 500ms — بعد ظهور الـ Login
   }
 
-  // تحقق من blocked أولاً
-  if (u) {
-    const serverRec = (D.siteUsers || []).find(x => x.id === u.id || (u.code && x.code === u.code && u.code !== ''));
-    if (serverRec && serverRec.blocked) {
-      showBlockedOverlay();
-      return;
-    }
-  }
-
-  // ══ نظام الكود مفعّل → إجبار تسجيل الدخول في كل مرة ══
-  // _codeVerifiedThisSession = false في كل تحميل للصفحة (متغير JS عادي)
-  if (isAllowActive()) {
-    if (!_codeVerifiedThisSession) {
-      // لو الطالب عنده حساب محفوظ → الـ Code Gate يكفي (بدون حاجة لإعادة تسجيل الاسم)
-      showCodeGate();
-      return;
-    }
-    // تحقق الكود ✅ → ادخّل الطالب
-    if (u) {
-      _proceedAfterLogin(u);
-      return;
-    }
-    // كود صح لكن مفيش حساب → أكمل للتسجيل
-  }
-
-  // نظام الكود مش مفعّل → المنطق العادي
-  if (u) {
-    if (!sessionStorage.getItem('login_shown_this_session')) {
-      _proceedAfterLogin(u);
-      return;
-    }
-  }
-
-  // مفيش حساب محفوظ → نعرض شاشة الاختيار
-  sessionStorage.setItem('login_shown_this_session', '1');
+  // ✅ دايمًا نعرض شاشة الاختيار — مش بندخّل أوتوماتيك
   showLoginWelcome();
 }
 
@@ -9052,8 +8938,6 @@ function logoutUser() {
   if (!confirm('هل تريد تسجيل الخروج؟')) return;
   localStorage.removeItem('reg_user');
   currentUser = null;
-  // نخلّي شاشة الـ login تظهر في الـ session الحالية بعد الخروج المتعمد
-  sessionStorage.setItem('login_shown_this_session', '1');
   showLoginWelcome();
 }
 
@@ -9555,61 +9439,6 @@ function renderLeaderboard() {
 }
 
 // ══════════════════════════════════════════════
-// HOMEWORK DATE HELPERS — Production-Ready Local Time
-// ══════════════════════════════════════════════
-
-/**
- * parseDeadlineLocal(raw)
- * ───────────────────────
- * يحوّل قيمة deadline المخزّنة إلى كائن Date
- * بدون أي تحويل UTC — يستخدم التوقيت المحلي للجهاز.
- *
- * المشكلة القديمة:
- *   new Date("2024-06-04T14:00") → بعض Android WebView تعاملها كـ UTC
- *   مما يُضيف أو يطرح ساعات تجعل الموعد يبدو قد مضى.
- *
- * الحل:
- *   نفكّك السلسلة يدوياً ونبنيها بـ new Date(y, m, d, h, min)
- *   وهذا دائماً يستخدم التوقيت المحلي بغض النظر عن المتصفح.
- */
-function parseDeadlineLocal(raw) {
-  if (!raw) return null;
-  const s = String(raw).trim();
-
-  // تاريخ فقط بدون وقت مثل "2024-06-04" → نهاية اليوم 23:59:59 محلياً
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const [y, m, d] = s.split('-').map(Number);
-    return new Date(y, m - 1, d, 23, 59, 59, 0);
-  }
-
-  // datetime-local مثل "2024-06-04T14:00" أو "2024-06-04T14:00:00"
-  const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (m2) {
-    const [, yr, mo, dy, hr, mn, sc] = m2.map(Number);
-    return new Date(yr, mo - 1, dy, hr, mn, sc || 0, 0);
-  }
-
-  // fallback — تفسير المتصفح الافتراضي (نادراً ما نصل هنا)
-  return new Date(s);
-}
-
-/**
- * isHomeworkClosed(deadline)
- * ──────────────────────────
- * الدالة الموحّدة لتحديد حالة الواجب:
- *   - true  → مغلق (انتهى الوقت فعلاً)
- *   - false → مفتوح (الوقت لم يمضِ بعد أو لا يوجد deadline)
- *
- * تستخدم parseDeadlineLocal داخلياً لضمان مقارنة التوقيت المحلي.
- */
-function isHomeworkClosed(deadline) {
-  if (!deadline) return false;
-  const dueDate = parseDeadlineLocal(deadline);
-  if (!dueDate || isNaN(dueDate.getTime())) return false;
-  return Date.now() > dueDate.getTime();
-}
-
-// ══════════════════════════════════════════════
 // HOMEWORK (ASSIGNMENTS)
 // ══════════════════════════════════════════════
 function renderHomeworkStudent() {
@@ -9634,8 +9463,17 @@ function renderHomeworkStudent() {
     const submitted = (D.hwSubmissions || []).find(s =>
       s.hwId === h.id && (s.studentCode === myCode || s.studentName === myName)
     );
-    const deadlineDate = parseDeadlineLocal(h.deadline);
-    const isLate = isHomeworkClosed(h.deadline);
+    const deadlineDate = (() => {
+      if (!h.deadline) return null;
+      // لو الـ deadline بينتهي بـ 00:00 → نعتبره نهاية اليوم 23:59
+      const raw = h.deadline;
+      if (raw.endsWith('T00:00') || raw.length === 10) {
+        return new Date(raw.replace('T00:00','') + 'T23:59:59');
+      }
+      return new Date(raw);
+    })();
+    const now = new Date();
+    const isLate = deadlineDate && deadlineDate < now;
     const deadlineStr = deadlineDate ? deadlineDate.toLocaleString('ar-EG', {
       year:'numeric', month:'short', day:'numeric',
       hour:'2-digit', minute:'2-digit'
@@ -9770,31 +9608,10 @@ async function submitHomeworkSafe(hwId) {
     const statusEl = document.getElementById('hw-submit-status-' + hwId);
     if (statusEl) statusEl.textContent = '⏳ جاري رفع الملف...';
     try {
-      const isImage = pendingFile.ext === '.jpg' || (pendingFile.base64 && pendingFile.base64.startsWith('data:image'));
-      if (isImage) {
-        // ✅ إصلاح المشكلة 3: الصور نرفعها على imgbb مباشرة — أسرع وأموثوق
-        const uploaded = await uploadToImgBB(pendingFile.base64);
-        if (uploaded) {
-          fileUrl = uploaded;
-        } else {
-          // fallback: Google Drive
-          const base64Data = pendingFile.base64.split(',')[1] || pendingFile.base64;
-          const r = await gsPost({ type: 'upload_pdf', filename: 'student_hw_' + Date.now() + pendingFile.ext, data: base64Data });
-          if (r && r.url) fileUrl = r.url;
-        }
-      } else {
-        // PDF/Word → Google Drive
-        const base64Data = pendingFile.base64.split(',')[1] || pendingFile.base64;
-        const r = await gsPost({ type: 'upload_pdf', filename: 'student_hw_' + Date.now() + pendingFile.ext, data: base64Data });
-        if (r && r.url) fileUrl = r.url;
-      }
-      if (!fileUrl && statusEl) {
-        statusEl.innerHTML = '<span style="color:var(--coral)">⚠️ فشل رفع الملف — يمكنك التسليم بدونه أو حاول مرة أخرى</span>';
-      }
-    } catch(e) {
-      const statusEl = document.getElementById('hw-submit-status-' + hwId);
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--coral)">⚠️ خطأ في رفع الملف: ' + e.message + '</span>';
-    }
+      const base64Data = pendingFile.base64.split(',')[1] || pendingFile.base64;
+      const r = await gsPost({ type: 'upload_pdf', filename: 'student_hw_' + Date.now() + pendingFile.ext, data: base64Data });
+      if (r && r.url) { fileUrl = r.url; }
+    } catch(e) {}
   }
 
   if (!ans && !link && !fileUrl) { alert('⚠️ اكتب إجابتك أو ارفع ملفاً أو أدخل رابطاً'); return; }
@@ -9843,10 +9660,6 @@ async function addHomework() {
   if (!title) { alert('أدخل عنوان الواجب'); return; }
   if (!D.homework) D.homework = [];
 
-  // ✅ إصلاح المشكلة 5: تعطيل الزر فوراً لمنع الضغط المزدوج
-  const publishBtn = document.querySelector('button[onclick="addHomework()"]');
-  if (publishBtn) { publishBtn.disabled = true; publishBtn.textContent = '⏳ جاري النشر...'; }
-
   const hw = {
     id: 'hw_' + Date.now(), title,
     grade: document.getElementById('hw-grade-in').value,
@@ -9854,52 +9667,42 @@ async function addHomework() {
     deadline: (() => {
       const raw = document.getElementById('hw-deadline-in').value;
       if (!raw) return '';
-      if (raw.length === 10) return raw + 'T23:59';
+      // لو المستخدم حدد يوم بس من غير ساعة (00:00) → نجعله 23:59
+      if (raw.endsWith('T00:00') || raw.length === 10) return raw.replace('T00:00','') + 'T23:59';
       return raw;
     })(),
     ts: Date.now(),
     date: new Date().toLocaleDateString('ar-EG')
   };
 
-  // رفع الملف المرفق لو موجود
+  // رفع الملف المرفق على Drive لو موجود
   if (window._hwFileBase64) {
     const statusEl = document.getElementById('hw-file-status');
-    if (statusEl) statusEl.textContent = '⏳ جاري رفع الملف...';
+    statusEl.textContent = '⏳ جاري رفع الملف...';
     try {
-      const isImage = window._hwFileType === 'image';
-      let fileUrl = null;
-      if (isImage) {
-        // صور → imgbb أسرع
-        fileUrl = await uploadToImgBB(window._hwFileBase64);
-      }
-      if (!fileUrl) {
-        const base64Data = window._hwFileBase64.split(',')[1] || window._hwFileBase64;
-        const ext = isImage ? '.jpg' : '.pdf';
-        const r = await gsPost({ type: 'upload_pdf', filename: 'hw_' + Date.now() + ext, data: base64Data });
-        if (r && r.url) fileUrl = r.url;
-      }
-      if (fileUrl) {
-        hw.fileUrl  = fileUrl;
+      const base64Data = window._hwFileBase64.split(',')[1] || window._hwFileBase64;
+      const ext = window._hwFileType === 'image' ? '.jpg' : '.pdf';
+      const r = await gsPost({ type: 'upload_pdf', filename: 'hw_' + Date.now() + ext, data: base64Data });
+      if (r && r.url) {
+        hw.fileUrl  = r.url;
         hw.fileType = window._hwFileType;
-        if (statusEl) { statusEl.textContent = '✅ تم رفع الملف'; statusEl.style.color = 'var(--g2)'; }
+        statusEl.textContent = '✅ تم رفع الملف';
+        statusEl.style.color = 'var(--g2)';
       } else {
-        if (statusEl) { statusEl.textContent = '⚠️ سيُنشر الواجب بدون مرفق'; statusEl.style.color = 'var(--amber)'; }
+        statusEl.textContent = '⚠️ فشل رفع الملف — سيُنشر الواجب بدون مرفق';
+        statusEl.style.color = 'var(--amber)';
       }
     } catch(e) {
-      const statusEl = document.getElementById('hw-file-status');
-      if (statusEl) { statusEl.textContent = '⚠️ فشل رفع الملف'; statusEl.style.color = 'var(--amber)'; }
+      statusEl.textContent = '⚠️ فشل رفع الملف';
     }
   }
 
   D.homework.unshift(hw);
-  // ✅ حفظ بالتوازي — الشيت والسايت دفعة واحدة بدل انتظار كل واحد
-  const [, r] = await Promise.all([
-    gsPost({ type: 'save_homework', hw }).catch(() => {}),
-    pushSiteData()
-  ]);
-
+  // حفظ على الشيت
+  gsPost({ type: 'save_homework', hw }).catch(() => {});
+  const r = await pushSiteData();
   if (r && r.status === 'ok') showToast('✅ تم نشر الواجب');
-  else showToast('⚠️ نُشر محلياً — تحقق من الاتصال');
+  else showToast('⚠️ تحقق من الاتصال');
 
   // مسح الحقول
   document.getElementById('hw-title-in').value = '';
@@ -9907,11 +9710,7 @@ async function addHomework() {
   document.getElementById('hw-deadline-in').value = '';
   document.getElementById('hw-file-in').value = '';
   document.getElementById('hw-file-name').textContent = 'لم يتم اختيار ملف';
-  const hwFileStatus = document.getElementById('hw-file-status');
-  if (hwFileStatus) hwFileStatus.textContent = '';
   window._hwFileBase64 = null; window._hwFileType = null; window._hwFileName = null;
-
-  if (publishBtn) { publishBtn.disabled = false; publishBtn.textContent = '➕ نشر الواجب'; }
 
   renderHwMgrList();
   renderHomeworkStudent();
@@ -9929,9 +9728,15 @@ function renderHwMgrList() {
   const el = document.getElementById('hw-mgr-list');
   if (!el) return;
   if (!D.homework || !D.homework.length) { el.innerHTML = '<p style="color:var(--gray);font-size:13px">لا توجد واجبات</p>'; return; }
+  const now = new Date();
   el.innerHTML = D.homework.map((h, i) => {
-    const dl = parseDeadlineLocal(h.deadline);
-    const locked = isHomeworkClosed(h.deadline);
+    const dl = (() => {
+      if (!h.deadline) return null;
+      const raw = h.deadline;
+      if (raw.endsWith('T00:00') || raw.length === 10) return new Date(raw.replace('T00:00','') + 'T23:59:59');
+      return new Date(raw);
+    })();
+    const locked = dl && dl < now;
     const dlStr = dl ? dl.toLocaleString('ar-EG',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : 'بدون موعد';
     const subCount = (D.hwSubmissions||[]).filter(s=>s.hwId===h.id).length;
     return `<div style="background:${locked?'#fff3f3':'var(--cream2)'};border:1.5px solid ${locked?'#ffcdd2':'var(--border)'};border-radius:var(--r);padding:14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px">
@@ -9963,7 +9768,7 @@ function renderHwSubmissionsList() {
         <div style="font-size:11px;color:var(--gray);flex:1">${hw ? hw.title : '—'} · ${s.date}</div>
       </div>
       ${s.ans ? `<div style="background:var(--white);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--ink2);margin-bottom:8px;white-space:pre-wrap">${s.ans}</div>` : ''}
-      ${s.fileUrl ? `<div style="margin-bottom:8px"><button onclick="openHwFile('${(s.fileUrl||'').replace(/'/g,String.fromCharCode(39))}')" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--blue2);color:var(--blue);border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif">👁 مشاهدة الواجب</button></div>` : ''}
+      ${s.fileUrl ? `<div style="margin-bottom:8px"><a href="${s.fileUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--blue2);color:var(--blue);border-radius:10px;font-size:12px;font-weight:700;text-decoration:none">👁 مشاهدة الواجب</a></div>` : ''}
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
         <input type="number" placeholder="الدرجة" min="0" max="100" value="${s.adminGrade !== undefined ? s.adminGrade : ''}"
           id="hw-grade-inp-${subIdx}" style="width:80px;padding:7px 10px;border:1.5px solid var(--border);border-radius:9px;font-family:'Cairo',sans-serif;font-size:13px;outline:none;background:var(--white)">
@@ -9976,37 +9781,17 @@ function renderHwSubmissionsList() {
     </div>`;
   }).join('');
 }
-async function saveHwGrade(idx) {
+function saveHwGrade(idx) {
   const subs = D.hwSubmissions || [];
   if (idx >= subs.length) return;
-
-  const grade   = document.getElementById('hw-grade-inp-'   + idx)?.value?.trim();
-  const total   = document.getElementById('hw-total-inp-'   + idx)?.value?.trim() || '10';
+  const grade   = document.getElementById('hw-grade-inp-' + idx)?.value?.trim();
+  const total   = document.getElementById('hw-total-inp-' + idx)?.value?.trim() || '10';
   const comment = document.getElementById('hw-comment-inp-' + idx)?.value?.trim() || '';
-
-  // 1. حدّث المصفوفة المحلية
   subs[idx].adminGrade   = grade;
   subs[idx].adminTotal   = total;
   subs[idx].adminComment = comment;
-
-  // 2. أرسل إلى Google Sheet مباشرةً (HwSubmissions شيت)
-  const sub = subs[idx];
-  gsPost({
-    type: 'save_hw_grade',
-    sub: {
-      hwId:         sub.hwId        || '',
-      studentCode:  sub.studentCode || '',
-      studentName:  sub.studentName || '',
-      adminGrade:   grade,
-      adminTotal:   total,
-      adminComment: comment
-    }
-  }).catch(ex => console.warn('save_hw_grade GS error:', ex));
-
-  // 3. حدّث SiteData (الـ blob) كـ fallback محلي
   pushSiteData().catch(() => {});
-
-  showToast('✅ تم حفظ الدرجة والتعليق وإرسالها للشيت');
+  showToast('✅ تم حفظ الدرجة والتعليق');
   renderHwSubmissionsList();
   renderHomeworkStudent && renderHomeworkStudent();
 }
@@ -10340,8 +10125,6 @@ async function submitAddUserManual() {
   const newUser = {
     id: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
     name, code, grade, phone, parentPhone: parent,
-    regDate: new Date().toLocaleDateString('ar-EG'),
-    regTime: new Date().toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'}),
     date: new Date().toLocaleDateString('ar-EG'),
     ts: Date.now(), blocked: false
   };
@@ -10352,26 +10135,16 @@ async function submitAddUserManual() {
     D.allowList.push({ code, name });
   }
   if(status) status.textContent = '⏳ جاري الحفظ...';
-
-  // ✅ إصلاح المشكلة 4: نرسل المستخدم للـ Google Sheet مباشرة + نحفظ بيانات السايت
-  try {
-    await gsPost({ type: 'register_user', user: newUser }).catch(() => {});
-  } catch(e) {}
-
   const r = await pushSiteData();
   persistAllowLocally();
-
-  // دايماً نعرض النتيجة ونقفل الـ modal بعد الإضافة
-  renderUsersMgr && renderUsersMgr();
-  renderAllowCodes && renderAllowCodes();
-
   if (r && r.status === 'ok') {
     showToast('✅ تمت إضافة ' + name + ' بنجاح');
+    renderUsersMgr && renderUsersMgr();
+    renderAllowCodes && renderAllowCodes();
     closeAddUserModal();
   } else {
-    // حتى لو فشل الحفظ على السيرفر — البيانات محفوظة محلياً
-    showToast('✅ تمت إضافة ' + name + ' (محلياً)');
-    closeAddUserModal();
+    if(status) status.textContent = '⚠️ أُضيف محلياً — تعذّر المزامنة مع السيرفر';
+    renderUsersMgr && renderUsersMgr();
   }
 }
 
@@ -10469,7 +10242,7 @@ function downloadUserExcelTemplate() {
 
 
 <!-- ══ CODE GATE OVERLAY ══ -->
-<div id="cgate-ov" style="display:flex">
+<div id="cgate-ov" style="display:none">
   <div class="reg-box">
     <div class="reg-head">
       <span class="reg-logo">🔐</span>
